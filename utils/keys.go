@@ -154,7 +154,7 @@ func ReadPublicKey(inPath string) (*P256PublicKey, error) {
 		log.Printf("Parsed public key: %v\n", parsedPublic)
 		break
 	default:
-		return nil, errors.New("parsed PKIX private key is not ECDSA")
+		return nil, errors.New("parsed PKIX public key is not ECDSA")
 	}
 
 	parsedKey := &P256PublicKey{
