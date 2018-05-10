@@ -1,4 +1,4 @@
-package main
+package exit
 
 import (
 	"crypto/rsa"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const serverIdentifierLength = 16
+const serverIdentifierMinLength = 4
 
 // Raw configurations for JSON parsing.
 type rawEntryServer struct {
@@ -129,7 +129,7 @@ func ReadConfig(configJSONPath string) *Config {
 	var seenIdentifiers []string
 	for _, s := range config.EntryServers {
 
-		if len(s.ServerIdentifier) != serverIdentifierLength {
+		if len(s.ServerIdentifier) < serverIdentifierMinLength {
 			log.Printf("Invalid entry identifier length: %s\n", s.ServerIdentifier)
 			continue
 		}
@@ -151,7 +151,7 @@ func ReadConfig(configJSONPath string) *Config {
 		parsed, err := x509.ParsePKIXPublicKey(rawPubKey)
 		parsedKey := parsed.(*rsa.PublicKey)
 		if err != nil {
-			log.Printf("Invalid base64-encoded public key for %s\n", s.ServerIdentifier)
+			log.Printf("Invalid DER-encoded public key for %s\n", s.ServerIdentifier)
 			continue
 		}
 

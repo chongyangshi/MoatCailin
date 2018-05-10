@@ -1,7 +1,8 @@
 {
     "exit_name": "Test Exit",
     "timeout": 10,
-    "private_key_file": "/tmp/example_private.pem",
+    "config_root": "/usr/local/etc/moatcailin/",
+    "encrypted_private_key": "exit1_PRIVATE.pem",
     "dns_servers": [
         {
             "ip": "1.1.1.1",
@@ -14,8 +15,16 @@
     ],
     "entry_servers": [
         {
-            "identifier": "1234567890123456",
-            "pubkey": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDXX/MsKEBLcLeKA1d/i7ufG1qsqS97xFkIRSeX3TwmHic843AfVrzoh2pZUeOvK9ZLZQpHSM7DoHMYDGD1273+FvZXYpf5LiFtecfxko/Cku16zy6WAeCYVFjjlveBhwPmPCIk+qDRYeiIW05QE2XK+CuDnJ7sxxXIJSSgD3Jo5wIDAQAB"
+            "identifier": "entry1",
+            "pubkey": "entry1_PUBLIC.pem"
+        },
+        {
+            "identifier": "entry2",
+            "pubkey": "entry2_PUBLIC.pem"
+        },
+        {
+            "identifier": "entry3",
+            "pubkey": "entry3_PUBLIC.pem"
         }
     ]
 }
