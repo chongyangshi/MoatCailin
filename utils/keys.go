@@ -13,10 +13,9 @@ import (
 	"path/filepath"
 )
 
-/*	MoatCailin uses P-256 ECDSA private and public keys for encrypted
-	authentication and communications between entry and exit servers,
-	where it is not necessary to implement obfuscation, due to
-	being outside censored networks.
+/*	MoatCailin uses P-256 ECDSA private and public keys for authentication
+	between entry and exit servers, where it is not necessary to implement o
+	bfuscation, due to being outside censored networks.
 */
 
 // P256PrivateKey represents a private P-256 ECDSA key in both byte forms
