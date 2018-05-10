@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/user"
 	"path"
 	"strings"
 	"testing"
@@ -53,10 +52,9 @@ func TestGenECDSAP256KeyPair(t *testing.T) {
 
 func TestPrivateReadWrite(t *testing.T) {
 	testPrivate, testPublic := GenECDSAP256KeyPair()
-	u, _ := user.Current() // Not sure the platform, have to use user directory...
 	pref := randomHex(16)
-	savePathPrivate := path.Join(u.HomeDir, strings.Join([]string{string(pref[:]), "_PRIVATE.pem"}, ""))
-	savePathPublic := path.Join(u.HomeDir, strings.Join([]string{string(pref[:]), "_PUBLIC.pem"}, ""))
+	savePathPrivate := path.Join(os.TempDir(), strings.Join([]string{string(pref[:]), "_PRIVATE.pem"}, ""))
+	savePathPublic := path.Join(os.TempDir(), strings.Join([]string{string(pref[:]), "_PUBLIC.pem"}, ""))
 	fmt.Println(savePathPrivate, savePathPublic)
 	saveerr := testPrivate.Save(savePathPrivate)
 	if saveerr != nil {
@@ -82,8 +80,7 @@ func TestPrivateReadWrite(t *testing.T) {
 
 func TestInvalidSave(t *testing.T) {
 	testPrivate, testPublic := GenECDSAP256KeyPair()
-	u, _ := user.Current() // Not sure the platform, have to use user directory...
-	invalidPath := path.Join(u.HomeDir, strings.Join([]string{randomHex(128), "INVALID.pem"}, ""))
+	invalidPath := path.Join(os.TempDir(), strings.Join([]string{randomHex(128), "INVALID.pem"}, ""))
 	expectederr := testPrivate.Save(invalidPath)
 	if expectederr == nil {
 		t.Errorf("Private key save failure expected but did not occur.")
@@ -95,8 +92,7 @@ func TestInvalidSave(t *testing.T) {
 }
 
 func TestInvalidRead(t *testing.T) {
-	u, _ := user.Current() // Not sure the platform, have to use user directory...
-	invalidPath := path.Join(u.HomeDir, strings.Join([]string{randomHex(128), "INVALID.pem"}, ""))
+	invalidPath := path.Join(os.TempDir(), strings.Join([]string{randomHex(128), "INVALID.pem"}, ""))
 	_, expectederr := ReadPrivateKey(invalidPath)
 	if expectederr == nil {
 		t.Errorf("Private key read failure expected but did not occur.")
@@ -108,12 +104,7 @@ func TestInvalidRead(t *testing.T) {
 }
 
 func TestInvalidContentRead(t *testing.T) {
-	u, _ := user.Current() // Not sure the platform, have to use user directory...
-
-	// Test panics if this directory exists for some unholy reason.
-	randomDir := path.Join(u.HomeDir, randomHex(32))
-	os.Mkdir(randomDir, 0777)
-	validPath := path.Join(u.HomeDir, strings.Join([]string{randomDir, "INVALIDCONTENT.pem"}, ""))
+	validPath := path.Join(os.TempDir(), strings.Join([]string{randomHex(32), "_INVALIDCONTENT.pem"}, ""))
 
 	// Write random garbage into it.
 	f, _ := os.Open(validPath)
@@ -129,5 +120,5 @@ func TestInvalidContentRead(t *testing.T) {
 		t.Errorf("Public key read content failure expected but did not occur.")
 	}
 
-	os.RemoveAll(randomDir)
+	os.RemoveAll(validPath)
 }
