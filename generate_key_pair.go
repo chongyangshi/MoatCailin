@@ -8,7 +8,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/icydoge/MoatCailin/crypto"
+	"github.com/icydoge/MoatCailin/crypt"
 )
 
 // Borrowed from https://stackoverflow.com/a/35240286/5693062
@@ -47,7 +47,7 @@ responsible for traffic encryption and authentication between entry and exit ser
 	}
 
 	fmt.Println("Generating the private and public keys...")
-	private, public := utils.GenRSAKeyPair()
+	private, public := crypt.GenRSAKeyPair()
 	if private == nil || public == nil {
 		fmt.Println("Runtime error was encountered while generating the key pair.")
 		os.Exit(1)
