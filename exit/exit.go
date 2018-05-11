@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os/user"
+	"path"
+	"strings"
 )
 
 func printConfig(config *Config) {
@@ -24,8 +27,13 @@ func printConfig(config *Config) {
 }
 
 func main() {
-	var configPath = flag.String("config", "~/mc_exit.json", "path to the MoatCailin exit server configuration file (default: ~/mc_exit.json).")
+	var configPath = flag.String("config", "~/.config/mc_exit.json", "path to the MoatCailin exit server configuration file (default: ~/mc_exit.json).")
 	flag.Parse()
+
+	if strings.HasPrefix(*configPath, "~") {
+		u, _ := user.Current()
+		*configPath = path.Join(u.HomeDir, string(*configPath)[1:])
+	}
 
 	printConfig(ReadConfig(*configPath))
 }
