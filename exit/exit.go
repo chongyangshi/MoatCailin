@@ -1,7 +1,6 @@
-package exit
+package main
 
 import (
-	"crypto/sha256"
 	"flag"
 	"fmt"
 )
@@ -11,7 +10,7 @@ func printConfig(config *Config) {
 		fmt.Println("Config invalid.")
 		return
 	}
-	fmt.Printf("MoatCailin exit server: %s.\n", config.ExitName)
+	fmt.Printf("MoatCailin exit server: %s (%s). \n", config.ExitName, config.ExitIdentifier)
 	fmt.Printf("Server timeout: %d seconds.\n", config.TimeOut)
 	// fmt.Println("DNS Resolvers:")
 	// for _, v := range config.DNSServers {
@@ -19,7 +18,7 @@ func printConfig(config *Config) {
 	// }
 	fmt.Printf("\nEntry Servers:\n")
 	for _, v := range config.EntryServers {
-		fmt.Printf("ID #%s with public key %x/%d\n", v.ServerIdentifier, sha256.Sum256([]byte(v.ServerPubKey.N.String())), v.ServerPubKey.E)
+		fmt.Printf("ID %s; \n", v.ServerIdentifier)
 	}
 	fmt.Printf("\n")
 }

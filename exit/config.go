@@ -1,14 +1,13 @@
-package exit
+package main
 
 import (
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"io/ioutil"
 	"log"
+	"path"
 	"time"
+
+	"github.com/icydoge/MoatCailin/crypt"
 )
 
 const serverIdentifierMinLength = 4
@@ -26,8 +25,10 @@ type rawDNSServer struct {
 
 type rawConfig struct {
 	ExitName       string           `json:"exit_name"`
+	ExitIdentifier string           `json:"exit_identifier"`
+	ConfigRoot     string           `json:"config_root"`
 	TimeOut        time.Duration    `json:"timeout"`
-	PrivateKeyFile string           `json:"private_key_file"`
+	PrivateKeyFile string           `json:"encrypted_private_key"`
 	EntryServers   []rawEntryServer `json:"entry_servers"`
 	// DNSServers     []rawDNSServer   `json:"dns_servers"`
 }
@@ -35,7 +36,7 @@ type rawConfig struct {
 // EntryServer defines a trusted entry server by this exit.
 type EntryServer struct {
 	ServerIdentifier string
-	ServerPubKey     *rsa.PublicKey
+	ServerPubKey     *crypt.RSAPublicKey
 }
 
 // DNSServer defines an external DNS server used for relayed
@@ -52,11 +53,12 @@ type EntryServer struct {
 
 // Config defines the configurations of this exit.
 type Config struct {
-	ExitName     string
-	TimeOut      time.Duration
-	EntryServers []EntryServer
+	ExitName       string
+	ExitIdentifier string
+	TimeOut        time.Duration
+	EntryServers   []EntryServer
 	// DNSServers     []DNSServer
-	ExitPrivateKey *rsa.PrivateKey
+	ExitPrivateKey *crypt.RSAPrivateKey
 }
 
 // ReadConfig parses the configuration file at proscribed location
@@ -85,19 +87,16 @@ func ReadConfig(configJSONPath string) *Config {
 	processedConfig.ExitName = config.ExitName
 
 	// Process private key.
-	privatepem, err := ioutil.ReadFile(config.PrivateKeyFile)
+	if len(config.ExitIdentifier) < serverIdentifierMinLength {
+		panic("Invalid exit identifier length.")
+	}
+	processedConfig.ExitIdentifier = config.ExitIdentifier
+
+	processedConfig.ExitPrivateKey, err = crypt.ReadPrivateKey(path.Join(config.ConfigRoot, config.PrivateKeyFile))
 	if err != nil {
-		panic("Cannot locate the private key file specified in the configuration.")
+		log.Printf("Private key error: %v\n", err)
+		panic("Error reading exit private key.")
 	}
-	rawPrivate, _ := pem.Decode(privatepem)
-	if rawPrivate == nil {
-		panic("Cannot decode the private key file specified in the configuration.")
-	}
-	parsedPrivate, err := x509.ParsePKCS1PrivateKey(rawPrivate.Bytes)
-	if err != nil {
-		panic("Invalid pem-encoded key for this exit server.")
-	}
-	processedConfig.ExitPrivateKey = parsedPrivate
 
 	// // Process DNS servers.
 	// var processedDNS []DNSServer
@@ -147,17 +146,15 @@ func ReadConfig(configJSONPath string) *Config {
 			seenIdentifiers = append(seenIdentifiers, s.ServerIdentifier)
 		}
 
-		rawPubKey, _ := base64.StdEncoding.DecodeString(s.ServerPubKey)
-		parsed, err := x509.ParsePKIXPublicKey(rawPubKey)
-		parsedKey := parsed.(*rsa.PublicKey)
+		pubkey, err := crypt.ReadPublicKey(path.Join(config.ConfigRoot, s.ServerPubKey))
 		if err != nil {
-			log.Printf("Invalid DER-encoded public key for %s\n", s.ServerIdentifier)
-			continue
+			log.Printf("Public key error: %v\n", err)
+			panic("Error reading exit private key.")
 		}
 
 		processedEntries = append(processedEntries, EntryServer{
 			ServerIdentifier: s.ServerIdentifier,
-			ServerPubKey:     parsedKey,
+			ServerPubKey:     pubkey,
 		})
 	}
 	processedConfig.EntryServers = processedEntries

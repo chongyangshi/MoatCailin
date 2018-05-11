@@ -1,5 +1,6 @@
 {
     "exit_name": "Test Exit",
+    "exit_identifier": "testexit",
     "timeout": 10,
     "config_root": "/usr/local/etc/moatcailin/",
     "encrypted_private_key": "exit1_PRIVATE.pem",
