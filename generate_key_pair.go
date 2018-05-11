@@ -29,8 +29,8 @@ func testValidPath(fp string) bool {
 }
 
 func main() {
-	fmt.Println(`This program will generate an ECDSA key pair for a MoatCailin entry or exit server,
-responsible for traffic encryption between entry and exit servers.`)
+	fmt.Println(`This program will generate an SHA key pair for a MoatCailin entry or exit server,
+responsible for traffic encryption and authentication between entry and exit servers.`)
 
 	var exportPath = flag.String("path", "/usr/local/etc/moatcailin/", "Path to directory storing the generated keypair.")
 	var exportName = flag.String("name", "MoatCailinNode", "Name prefix for the private and public key files.")
@@ -47,7 +47,7 @@ responsible for traffic encryption between entry and exit servers.`)
 	}
 
 	fmt.Println("Generating the private and public keys...")
-	private, public := utils.GenECDSAP256KeyPair()
+	private, public := utils.GenRSAKeyPair()
 	if private == nil || public == nil {
 		fmt.Println("Runtime error was encountered while generating the key pair.")
 		os.Exit(1)
@@ -57,6 +57,7 @@ responsible for traffic encryption between entry and exit servers.`)
 	publicOutPath := path.Join(*exportPath, strings.Join([]string{*exportName, "_PUBLIC.pem"}, ""))
 	fmt.Println("Saving the private key...")
 	err1 := private.Save(privateOutPath)
+	fmt.Println("Saving the public key...")
 	err2 := public.Save(publicOutPath)
 
 	if err1 != nil {

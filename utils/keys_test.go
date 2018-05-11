@@ -1,11 +1,12 @@
 package utils
 
 import (
-	"crypto/ecdsa"
+	"crypto"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -19,59 +20,80 @@ func randomHex(n int) string {
 	return hex.EncodeToString(bytes)
 }
 
-func TestGenECDSAP256KeyPair(t *testing.T) {
+func TestGenRSAKeyPair(t *testing.T) {
 
-	private, public := GenECDSAP256KeyPair()
+	private, public := GenRSAKeyPair()
 	if private == nil || public == nil {
-		t.Errorf("Cannot correctly generate private and public ECDSA P-256 keys.")
+		t.Errorf("Cannot correctly generate private and public RSA 2048-bit keys.")
 	}
 
 	// Test key functions.
 	randomBytes := make([]byte, 1024)
 	rand.Read(randomBytes)
-	r, s, signerr := ecdsa.Sign(rand.Reader, private.privateKey, randomBytes)
+	hashed := sha256.Sum256(randomBytes)
+	var sha256hash = hashed[:]
+	sig, signerr := rsa.SignPKCS1v15(rand.Reader, private.privateKey, crypto.SHA256, sha256hash)
 	if signerr != nil {
-		t.Errorf("ECDSA private key cannot successfully sign hash.")
+		t.Logf("%v", signerr)
+		t.Errorf("RSA private key cannot successfully sign hash.")
 	}
 
-	ver := ecdsa.Verify(public.publicKey, randomBytes, r, s)
-	if !ver {
-		t.Errorf("ECDSA private key cannot successfully verify hash.")
+	err := rsa.VerifyPKCS1v15(public.publicKey, crypto.SHA256, sha256hash, sig)
+	if err != nil {
+		t.Logf("%v", signerr)
+		t.Errorf("RSA private key cannot successfully verify hash.")
 	}
 
 	// Test key bytes.
-	_, parserrr := x509.ParseECPrivateKey(private.privateKeyBytes)
+	_, parserrr := x509.ParsePKCS1PrivateKey(private.privateKeyBytes)
 	if parserrr != nil {
-		t.Errorf("ECDSA private key bytes cannot be successfully parsed.")
+		t.Errorf("RSA private key bytes cannot be successfully parsed.")
 	}
-	_, parserrr = x509.ParsePKIXPublicKey(public.publicKeyBytes)
+	_, parserrr = x509.ParsePKCS1PublicKey(public.publicKeyBytes)
 	if parserrr != nil {
-		t.Errorf("ECDSA public key bytes cannot be successfully parsed.")
+		t.Errorf("RSA public key bytes cannot be successfully parsed.")
 	}
 }
 
-func TestPrivateReadWrite(t *testing.T) {
-	testPrivate, testPublic := GenECDSAP256KeyPair()
+func TestReadWrite(t *testing.T) {
+	testPrivate, testPublic := GenRSAKeyPair()
 	pref := randomHex(16)
 	savePathPrivate := path.Join(os.TempDir(), strings.Join([]string{string(pref[:]), "_PRIVATE.pem"}, ""))
 	savePathPublic := path.Join(os.TempDir(), strings.Join([]string{string(pref[:]), "_PUBLIC.pem"}, ""))
-	fmt.Println(savePathPrivate, savePathPublic)
+
 	saveerr := testPrivate.Save(savePathPrivate)
 	if saveerr != nil {
-		t.Errorf("ECDSA private key cannot be successfully saved.")
+		t.Errorf("RSA private key cannot be successfully saved.")
 	}
 	saveerr = testPublic.Save(savePathPublic)
 	if saveerr != nil {
-		t.Errorf("ECDSA public key cannot be successfully saved.")
+		t.Errorf("RSA public key cannot be successfully saved.")
 	}
 
-	_, readerr := ReadPrivateKey(savePathPrivate)
+	private, readerr := ReadPrivateKey(savePathPrivate)
 	if readerr != nil {
-		t.Errorf("Saved ECDSA private key cannot be successfully read.")
+		t.Errorf("Saved RSA private key cannot be successfully read.")
 	}
-	_, readerr = ReadPublicKey(savePathPublic)
+	public, readerr := ReadPublicKey(savePathPublic)
 	if readerr != nil {
-		t.Errorf("Saved ECDSA public key cannot be successfully read.")
+		t.Errorf("Saved RSA public key cannot be successfully read.")
+	}
+
+	// Test key functions.
+	randomBytes := make([]byte, 1024)
+	rand.Read(randomBytes)
+	hashed := sha256.Sum256(randomBytes)
+	var sha256hash = hashed[:]
+	sig, signerr := rsa.SignPKCS1v15(rand.Reader, private.privateKey, crypto.SHA256, sha256hash)
+	if signerr != nil {
+		t.Logf("%v", signerr)
+		t.Errorf("RSA private key cannot successfully sign hash.")
+	}
+
+	err := rsa.VerifyPKCS1v15(public.publicKey, crypto.SHA256, sha256hash, sig)
+	if err != nil {
+		t.Logf("%v", signerr)
+		t.Errorf("RSA private key cannot successfully verify hash.")
 	}
 
 	os.Remove(savePathPrivate)
@@ -79,7 +101,7 @@ func TestPrivateReadWrite(t *testing.T) {
 }
 
 func TestInvalidSave(t *testing.T) {
-	testPrivate, testPublic := GenECDSAP256KeyPair()
+	testPrivate, testPublic := GenRSAKeyPair()
 	invalidPath := path.Join(os.TempDir(), strings.Join([]string{randomHex(128), "INVALID.pem"}, ""))
 	expectederr := testPrivate.Save(invalidPath)
 	if expectederr == nil {
