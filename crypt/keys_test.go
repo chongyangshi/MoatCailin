@@ -2,6 +2,7 @@ package crypt
 
 import (
 	"crypto"
+	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -143,4 +144,14 @@ func TestInvalidContentRead(t *testing.T) {
 	}
 
 	os.RemoveAll(validPath)
+}
+
+func TestPubKeyFingerprint(t *testing.T) {
+	_, testPublic := GenRSAKeyPair()
+	MD5Bytes := md5.Sum(testPublic.publicKeyBytes)
+	correctMD5 := hex.EncodeToString(MD5Bytes[:])
+
+	if correctMD5 != testPublic.Fingerprint() {
+		t.Errorf("Public key fingerprint incorrectly generated.")
+	}
 }

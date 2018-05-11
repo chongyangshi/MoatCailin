@@ -21,7 +21,7 @@ func printConfig(config *Config) {
 	// }
 	fmt.Printf("\nEntry Servers:\n")
 	for _, v := range config.EntryServers {
-		fmt.Printf("ID %s; \n", v.ServerIdentifier)
+		fmt.Printf("ID %s (key %v) \n", v.ServerIdentifier, v.ServerPubKey.Fingerprint())
 	}
 	fmt.Printf("\n")
 }

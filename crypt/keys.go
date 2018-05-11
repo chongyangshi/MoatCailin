@@ -1,9 +1,11 @@
 package crypt
 
 import (
+	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"io/ioutil"
@@ -103,6 +105,14 @@ func (p *RSAPublicKey) Save(outPath string) error {
 	return nil
 }
 
+// Fingerprint returns the RSA public key fingerprint commonly used
+// to identify public keys.
+func (p *RSAPublicKey) Fingerprint() string {
+	h := md5.New()
+	h.Write(p.publicKeyBytes)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // ReadPrivateKey parses an RSA private key from the target location.
 // Returns error if failed.
 func ReadPrivateKey(inPath string) (*RSAPrivateKey, error) {
@@ -118,6 +128,7 @@ func ReadPrivateKey(inPath string) (*RSAPrivateKey, error) {
 		return nil, errors.New("cannot decode the private key file")
 	}
 
+	parsedPrivate.Precompute()
 	parsedKey := &RSAPrivateKey{
 		privateKey:      parsedPrivate,
 		privateKeyBytes: decodedPEM.Bytes,
