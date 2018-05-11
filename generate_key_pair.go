@@ -8,7 +8,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/icydoge/MoatCailin/utils"
+	"github.com/icydoge/MoatCailin/crypto"
 )
 
 // Borrowed from https://stackoverflow.com/a/35240286/5693062
