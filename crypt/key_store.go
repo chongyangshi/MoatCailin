@@ -10,8 +10,7 @@ import "sync"
 // PubKeyStore defines the common interface for retrieveing
 // and storing public keys.
 type PubKeyStore interface {
-	New()
-	Store(RSAPublicKey)
+	Store(*RSAPublicKey)
 	Retrieve(string) *RSAPublicKey
 }
 

@@ -49,6 +49,7 @@ func (g S2SPayloadGenerator) EncryptAndSign(payload []byte, dest string) *S2SPay
 	encryptedPayload, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, destinationPubKey.publicKey, payload, nil)
 	if err != nil {
 		log.Printf("Cannot properly encrypt the payload for %v, possibly oversized.\n", dest)
+		log.Printf("Error: %v\n", err)
 		return nil
 	}
 
