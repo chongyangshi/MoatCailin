@@ -8,4 +8,7 @@ package crypt
 // ServerToServerPayload carries the encrypted payload along with
 // a signature from the source server.
 type ServerToServerPayload struct {
+	SourceIdentifier string
+	ProxyPayload     []byte
+	PayloadSignature []byte
 }

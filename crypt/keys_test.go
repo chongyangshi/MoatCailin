@@ -155,3 +155,13 @@ func TestPubKeyFingerprint(t *testing.T) {
 		t.Errorf("Public key fingerprint incorrectly generated.")
 	}
 }
+
+func TestPubKeyIdentifier(t *testing.T) {
+	_, testPublic := GenRSAKeyPair()
+	SHA2Bytes := sha256.Sum256(testPublic.publicKeyBytes)
+	correctSHA2 := hex.EncodeToString(SHA2Bytes[:])
+
+	if correctSHA2 != testPublic.Identifier() {
+		t.Errorf("Public key identifier incorrectly generated.")
+	}
+}

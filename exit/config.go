@@ -10,12 +10,9 @@ import (
 	"github.com/icydoge/MoatCailin/crypt"
 )
 
-const serverIdentifierMinLength = 4
-
 // Raw configurations for JSON parsing.
 type rawEntryServer struct {
-	ServerIdentifier string `json:"identifier"`
-	ServerPubKey     string `json:"pubkey"`
+	ServerPubKey string `json:"pubkey"`
 }
 
 type rawDNSServer struct {
@@ -25,10 +22,10 @@ type rawDNSServer struct {
 
 type rawConfig struct {
 	ExitName       string           `json:"exit_name"`
-	ExitIdentifier string           `json:"exit_identifier"`
 	ConfigRoot     string           `json:"config_root"`
 	TimeOut        time.Duration    `json:"timeout"`
 	PrivateKeyFile string           `json:"encrypted_private_key"`
+	PublicKeyFile  string           `json:"public_key"`
 	EntryServers   []rawEntryServer `json:"entry_servers"`
 	// DNSServers     []rawDNSServer   `json:"dns_servers"`
 }
@@ -87,16 +84,19 @@ func ReadConfig(configJSONPath string) *Config {
 	processedConfig.ExitName = config.ExitName
 
 	// Process private key.
-	if len(config.ExitIdentifier) < serverIdentifierMinLength {
-		panic("Invalid exit identifier length.")
-	}
-	processedConfig.ExitIdentifier = config.ExitIdentifier
-
 	processedConfig.ExitPrivateKey, err = crypt.ReadPrivateKey(path.Join(config.ConfigRoot, config.PrivateKeyFile))
 	if err != nil {
 		log.Printf("Private key error: %v\n", err)
 		panic("Error reading exit private key.")
 	}
+	exitPublicKey, err := crypt.ReadPublicKey(path.Join(config.ConfigRoot, config.PublicKeyFile))
+	if err != nil {
+		log.Printf("Public key error: %v\n", err)
+		panic("Error reading exit public key.")
+	}
+
+	// The server identifier is the SHA256 hash of its public key bytes.
+	processedConfig.ExitIdentifier = exitPublicKey.Identifier()
 
 	// // Process DNS servers.
 	// var processedDNS []DNSServer
@@ -128,32 +128,27 @@ func ReadConfig(configJSONPath string) *Config {
 	var seenIdentifiers []string
 	for _, s := range config.EntryServers {
 
-		if len(s.ServerIdentifier) < serverIdentifierMinLength {
-			log.Printf("Invalid entry identifier length: %s\n", s.ServerIdentifier)
-			continue
-		}
-
-		idSeen := false
-		for _, v := range seenIdentifiers {
-			if v == s.ServerIdentifier {
-				idSeen = true
-				break
-			}
-		}
-		if idSeen {
-			log.Printf("Duplicate server identifier: %s\n", s.ServerIdentifier)
-		} else {
-			seenIdentifiers = append(seenIdentifiers, s.ServerIdentifier)
-		}
-
 		pubkey, err := crypt.ReadPublicKey(path.Join(config.ConfigRoot, s.ServerPubKey))
 		if err != nil {
 			log.Printf("Public key error: %v\n", err)
 			panic("Error reading exit private key.")
 		}
 
+		idSeen := false
+		for _, v := range seenIdentifiers {
+			if v == pubkey.Identifier() {
+				idSeen = true
+				break
+			}
+		}
+		if idSeen {
+			log.Printf("Duplicate server identifier: %s\n", pubkey.Identifier())
+		} else {
+			seenIdentifiers = append(seenIdentifiers, pubkey.Identifier())
+		}
+
 		processedEntries = append(processedEntries, EntryServer{
-			ServerIdentifier: s.ServerIdentifier,
+			ServerIdentifier: pubkey.Identifier(),
 			ServerPubKey:     pubkey,
 		})
 	}

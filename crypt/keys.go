@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
@@ -106,9 +107,17 @@ func (p *RSAPublicKey) Save(outPath string) error {
 }
 
 // Fingerprint returns the RSA public key fingerprint commonly used
-// to identify public keys.
+// to identify public keys. Using MD5 for legacy compatibility.
 func (p *RSAPublicKey) Fingerprint() string {
 	h := md5.New()
+	h.Write(p.publicKeyBytes)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Identifier generates a more modern hash of the public key
+// for cross-server identification
+func (p *RSAPublicKey) Identifier() string {
+	h := sha256.New()
 	h.Write(p.publicKeyBytes)
 	return hex.EncodeToString(h.Sum(nil))
 }
