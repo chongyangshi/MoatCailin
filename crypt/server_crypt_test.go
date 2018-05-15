@@ -3,6 +3,8 @@ package crypt
 import (
 	"bytes"
 	"crypto"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -92,7 +94,7 @@ var testGenerator = S2SPayloadGenerator{
 func TestEncryptAndSign(t *testing.T) {
 
 	// Craft some random bytes and encrypt it.
-	randomBytes := make([]byte, 16)
+	randomBytes := make([]byte, 2048)
 	rand.Read(randomBytes)
 	testS2SPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier())
 
@@ -104,13 +106,19 @@ func TestEncryptAndSign(t *testing.T) {
 		t.Errorf("Target identifier in the test S2S Payload mismatched.")
 	}
 
-	// Decrypt payload to verify bytes.
-	decryptedBytes, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, testGenerator.privKey.privateKey, testS2SPayload.ProxyPayload, nil)
+	// Decrypt symmetric key to decrypt payload.
+	key, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, testGenerator.privKey.privateKey, testS2SPayload.EncryptedKey, nil)
 	if err != nil {
-		t.Errorf("Error decrypting the test S2S Payload.")
+		t.Errorf("Error decrypting the test symmetric key.")
+		t.Errorf("Decryption error: %v", err)
 	}
+
+	// Decrypt the payload now.
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+	decryptedBytes, _ := gcm.Open(nil, testS2SPayload.PayloadNonce, testS2SPayload.ProxyPayload, nil)
 	if bytes.Compare(decryptedBytes, randomBytes) != 0 {
-		t.Errorf("Improper decryption of the test S2S Payload.")
+		t.Errorf("Improper decryption of the test payload.")
 	}
 
 	// Check the signature.
@@ -124,17 +132,31 @@ func TestEncryptAndSign(t *testing.T) {
 
 func TestDecryptAndVerify(t *testing.T) {
 
-	// Craft some random bytes and encrypt it.
-	randomBytes := make([]byte, 16)
+	// Generate and encrypt a random key for AES-256.
+	testKey := make([]byte, symmetricKeySize)
+	rand.Read(testKey)
+	encryptedTestKey, _ := rsa.EncryptOAEP(sha256.New(), rand.Reader, testPublic.publicKey, testKey, nil)
+
+	// Generate and encrypt a random payload.
+	randomBytes := make([]byte, 2048)
 	rand.Read(randomBytes)
-	testPayload, _ := rsa.EncryptOAEP(sha256.New(), rand.Reader, testPublic.publicKey, randomBytes, nil)
-	payloadHash := sha256.Sum256(testPayload)
+	block, _ := aes.NewCipher(testKey)
+	gcm, _ := cipher.NewGCM(block)
+	nonce := make([]byte, gcm.NonceSize())
+	rand.Read(nonce)
+	testEncryptedPayload := gcm.Seal(nil, nonce, randomBytes, nil)
+
+	// Sign it as well.
+	payloadHash := sha256.Sum256(testEncryptedPayload)
 	testSignature, _ := rsa.SignPSS(rand.Reader, testGenerator.privKey.privateKey, crypto.SHA256, payloadHash[:], nil)
+
 	testS2SPayload := &S2SPayload{
 		SourceIdentifier:      testGenerator.pubKey.Identifier(),
 		DestinationIdentifier: testPublic.Identifier(),
-		ProxyPayload:          testPayload,
+		ProxyPayload:          testEncryptedPayload,
 		PayloadSignature:      testSignature,
+		EncryptedKey:          encryptedTestKey,
+		PayloadNonce:          nonce,
 	}
 
 	// Verify decryption and verification.
@@ -144,6 +166,57 @@ func TestDecryptAndVerify(t *testing.T) {
 	}
 	if verification != nil {
 		t.Errorf("Unable to verify the encrypted test S2S Payload.")
+		t.Errorf("Verification error: %v", verification)
 	}
 
+}
+
+func TestDecryptGCM(t *testing.T) {
+	// Controlled decryption of random bytes.
+	randomBytes := make([]byte, 2048)
+	rand.Read(randomBytes)
+	testEncryptedPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier())
+	testKey, _ := rsa.DecryptOAEP(sha256.New(), rand.Reader, testGenerator.privKey.privateKey, testEncryptedPayload.EncryptedKey, nil)
+	testDecryptedPayload, err := decryptGCM(testEncryptedPayload.ProxyPayload, testKey, testEncryptedPayload.PayloadNonce)
+
+	if err != nil {
+		t.Errorf("Unable to decrypt random GCM-encrypted bytes.")
+		t.Errorf("Error: %v", err)
+	}
+	if bytes.Compare(testDecryptedPayload, randomBytes) != 0 {
+		t.Errorf("Unable to correctly decrypt random GCM-encrypted bytes.")
+		t.Errorf("Error: %v", err)
+	}
+}
+
+func TestRekey(t *testing.T) {
+
+	var rekeyTestGenerator = S2SPayloadGenerator{
+		keyStore: testKeyStore,
+		privKey:  testPrivKey,
+		pubKey:   testPublic,
+	}
+
+	testCipherError := rekeyTestGenerator.getCipher()
+	if testCipherError != nil {
+		t.Errorf("Unable to correctly initialise test cipher.")
+		t.Errorf("Error: %v", testCipherError)
+	}
+	originalKey := rekeyTestGenerator.currentKey
+
+	for i := 0; i < maxNouncePerKey+1; i++ {
+		err := rekeyTestGenerator.getCipher() // Force nounce reset.
+		if err != nil {
+			t.Errorf("Rekey error: %v", err)
+			return
+		}
+	}
+
+	if bytes.Compare(originalKey, rekeyTestGenerator.currentKey) == 0 {
+		t.Errorf("Test cipher was not correctly rekeyed after reaching max nounce count.")
+	}
+
+	if len(rekeyTestGenerator.currentKey) != symmetricKeySize {
+		t.Errorf("Test cipher was not correctly rekeyed with valid length.")
+	}
 }
