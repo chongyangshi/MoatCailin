@@ -1,12 +1,14 @@
 package crypt
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"log"
@@ -51,6 +53,29 @@ type S2SPayload struct {
 	ProxyPayload          []byte
 	PayloadNonce          []byte
 	PayloadSignature      []byte
+}
+
+// Marshal encodes the payload into transmittable bytes.
+func (s S2SPayload) Marshal() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := gob.NewEncoder(&b)
+	err := e.Encode(s)
+	if err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+// Unmarshal decodes the payload into a server-to-server payload.
+func (s *S2SPayload) Unmarshal(source []byte) error {
+	b := bytes.Buffer{}
+	b.Write(source)
+	d := gob.NewDecoder(&b)
+	err := d.Decode(s)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // S2SPayloadGenerator creates S2SPayloads by encrypting payloads

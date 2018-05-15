@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
+	"reflect"
 	"testing"
 )
 
@@ -84,6 +85,7 @@ func (d DummyKeyStore) Retrieve(in string) *RSAPublicKey {
 var testPublic = getTestPublicKey()
 var testPrivKey = getTestPrivateKey()
 var testKeyStore = DummyKeyStore{}
+var randomTestSize = 2048
 
 var testGenerator = S2SPayloadGenerator{
 	keyStore: testKeyStore,
@@ -94,7 +96,7 @@ var testGenerator = S2SPayloadGenerator{
 func TestEncryptAndSign(t *testing.T) {
 
 	// Craft some random bytes and encrypt it.
-	randomBytes := make([]byte, 2048)
+	randomBytes := make([]byte, randomTestSize)
 	rand.Read(randomBytes)
 	testS2SPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier())
 
@@ -138,7 +140,7 @@ func TestDecryptAndVerify(t *testing.T) {
 	encryptedTestKey, _ := rsa.EncryptOAEP(sha256.New(), rand.Reader, testPublic.publicKey, testKey, nil)
 
 	// Generate and encrypt a random payload.
-	randomBytes := make([]byte, 2048)
+	randomBytes := make([]byte, randomTestSize)
 	rand.Read(randomBytes)
 	block, _ := aes.NewCipher(testKey)
 	gcm, _ := cipher.NewGCM(block)
@@ -173,7 +175,7 @@ func TestDecryptAndVerify(t *testing.T) {
 
 func TestDecryptGCM(t *testing.T) {
 	// Controlled decryption of random bytes.
-	randomBytes := make([]byte, 2048)
+	randomBytes := make([]byte, randomTestSize)
 	rand.Read(randomBytes)
 	testEncryptedPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier())
 	testKey, _ := rsa.DecryptOAEP(sha256.New(), rand.Reader, testGenerator.privKey.privateKey, testEncryptedPayload.EncryptedKey, nil)
@@ -219,4 +221,27 @@ func TestRekey(t *testing.T) {
 	if len(rekeyTestGenerator.currentKey) != symmetricKeySize {
 		t.Errorf("Test cipher was not correctly rekeyed with valid length.")
 	}
+}
+
+func TestMarshalling(t *testing.T) {
+	// Encrypt and marshal.
+	randomBytes := make([]byte, randomTestSize)
+	rand.Read(randomBytes)
+	testS2SPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier())
+	marhsalledPayload, err := testS2SPayload.Marshal()
+	if err != nil {
+		t.Errorf("Marshalling of test payload failed: %v", err)
+	}
+
+	// Unmarshal and decrypt.
+	unmarshalledPayload := S2SPayload{}
+	err = unmarshalledPayload.Unmarshal(marhsalledPayload)
+	if err != nil {
+		t.Errorf("Unmarshalling of marshalled test payload failed: %v", err)
+	}
+
+	if !reflect.DeepEqual(unmarshalledPayload, *testS2SPayload) {
+		t.Errorf("Improper reconstruction of payload after marshalling.")
+	}
+
 }
