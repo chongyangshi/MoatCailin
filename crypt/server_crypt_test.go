@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
+	"net"
 	"reflect"
 	"testing"
 )
@@ -85,9 +86,11 @@ func (d DummyKeyStore) Retrieve(in string) *RSAPublicKey {
 var testPublic = getTestPublicKey()
 var testPrivKey = getTestPrivateKey()
 var testKeyStore = DummyKeyStore{}
+var testProtocol = 1
+var testRemote, _ = net.ResolveIPAddr("ip4", "8.8.8.8")
 var randomTestSize = 2048
 
-var testGenerator = S2SPayloadGenerator{
+var testGenerator = S2SDataGenerator{
 	keyStore: testKeyStore,
 	privKey:  testPrivKey,
 	pubKey:   testPublic,
@@ -98,18 +101,18 @@ func TestEncryptAndSign(t *testing.T) {
 	// Craft some random bytes and encrypt it.
 	randomBytes := make([]byte, randomTestSize)
 	rand.Read(randomBytes)
-	testS2SPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier())
+	testS2SData := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier(), *testRemote, testProtocol)
 
 	// Check the identifiers.
-	if testS2SPayload.SourceIdentifier != testGenerator.pubKey.Identifier() {
+	if testS2SData.SourceIdentifier != testGenerator.pubKey.Identifier() {
 		t.Errorf("Source identifier in the test S2S Payload mismatched.")
 	}
-	if testS2SPayload.DestinationIdentifier != testPublic.Identifier() {
+	if testS2SData.DestinationIdentifier != testPublic.Identifier() {
 		t.Errorf("Target identifier in the test S2S Payload mismatched.")
 	}
 
 	// Decrypt symmetric key to decrypt payload.
-	key, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, testGenerator.privKey.privateKey, testS2SPayload.EncryptedKey, nil)
+	key, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, testGenerator.privKey.privateKey, testS2SData.EncryptedKey, nil)
 	if err != nil {
 		t.Errorf("Error decrypting the test symmetric key.")
 		t.Errorf("Decryption error: %v", err)
@@ -118,14 +121,25 @@ func TestEncryptAndSign(t *testing.T) {
 	// Decrypt the payload now.
 	block, _ := aes.NewCipher(key)
 	gcm, _ := cipher.NewGCM(block)
-	decryptedBytes, _ := gcm.Open(nil, testS2SPayload.PayloadNonce, testS2SPayload.ProxyPayload, nil)
-	if bytes.Compare(decryptedBytes, randomBytes) != 0 {
+	decryptedBytes, _ := gcm.Open(nil, testS2SData.PayloadNonce, testS2SData.ProxyPayload, nil)
+	restoredPayload := S2SPayload{}
+	err = restoredPayload.Unmarshal(decryptedBytes)
+	if err != nil {
+		t.Errorf("Corrupted inner payload detected.")
+	}
+	if bytes.Compare(restoredPayload.Layer4Payload, randomBytes) != 0 {
 		t.Errorf("Improper decryption of the test payload.")
+	}
+	if !reflect.DeepEqual(*testRemote, restoredPayload.RemoteAddr) {
+		t.Errorf("Remote address not successfully preserved.")
+	}
+	if restoredPayload.ProtocolID != testProtocol {
+		t.Errorf("Wrapped packet protocol not successfully preserved.")
 	}
 
 	// Check the signature.
-	payloadHash := sha256.Sum256(testS2SPayload.ProxyPayload)
-	sigok := rsa.VerifyPSS(testPublic.publicKey, crypto.SHA256, payloadHash[:], testS2SPayload.PayloadSignature, nil)
+	payloadHash := sha256.Sum256(testS2SData.ProxyPayload)
+	sigok := rsa.VerifyPSS(testPublic.publicKey, crypto.SHA256, payloadHash[:], testS2SData.PayloadSignature, nil)
 	if sigok != nil {
 		t.Errorf("Bad signature for the test S2S Payload.")
 	}
@@ -139,20 +153,27 @@ func TestDecryptAndVerify(t *testing.T) {
 	rand.Read(testKey)
 	encryptedTestKey, _ := rsa.EncryptOAEP(sha256.New(), rand.Reader, testPublic.publicKey, testKey, nil)
 
-	// Generate and encrypt a random payload.
+	// Generatea random payload.
 	randomBytes := make([]byte, randomTestSize)
 	rand.Read(randomBytes)
+
+	// Wrap it and encrypt it.
+	innerPayload, _ := S2SPayload{
+		RemoteAddr:    *testRemote,
+		ProtocolID:    testProtocol,
+		Layer4Payload: randomBytes,
+	}.Marshal()
 	block, _ := aes.NewCipher(testKey)
 	gcm, _ := cipher.NewGCM(block)
 	nonce := make([]byte, gcm.NonceSize())
 	rand.Read(nonce)
-	testEncryptedPayload := gcm.Seal(nil, nonce, randomBytes, nil)
+	testEncryptedPayload := gcm.Seal(innerPayload[:0], nonce, innerPayload, nil)
 
 	// Sign it as well.
 	payloadHash := sha256.Sum256(testEncryptedPayload)
 	testSignature, _ := rsa.SignPSS(rand.Reader, testGenerator.privKey.privateKey, crypto.SHA256, payloadHash[:], nil)
 
-	testS2SPayload := &S2SPayload{
+	testS2SData := &S2SData{
 		SourceIdentifier:      testGenerator.pubKey.Identifier(),
 		DestinationIdentifier: testPublic.Identifier(),
 		ProxyPayload:          testEncryptedPayload,
@@ -162,13 +183,20 @@ func TestDecryptAndVerify(t *testing.T) {
 	}
 
 	// Verify decryption and verification.
-	decryptedBytes, verification := testGenerator.DecryptAndVerify(testS2SPayload)
+	decryptedBytes, remote, proto, verification := testGenerator.DecryptAndVerify(testS2SData)
 	if bytes.Compare(decryptedBytes, randomBytes) != 0 {
 		t.Errorf("Improper decryption of the test S2S Payload.")
 	}
 	if verification != nil {
 		t.Errorf("Unable to verify the encrypted test S2S Payload.")
 		t.Errorf("Verification error: %v", verification)
+	}
+	if testRemote.String() != remote.String() {
+		t.Errorf("Remote address not successfully preserved: %v instead of %v",
+			remote.String(), testRemote.String())
+	}
+	if proto != testProtocol {
+		t.Errorf("Wrapped packet protocol not successfully preserved.")
 	}
 
 }
@@ -177,7 +205,7 @@ func TestDecryptGCM(t *testing.T) {
 	// Controlled decryption of random bytes.
 	randomBytes := make([]byte, randomTestSize)
 	rand.Read(randomBytes)
-	testEncryptedPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier())
+	testEncryptedPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier(), *testRemote, testProtocol)
 	testKey, _ := rsa.DecryptOAEP(sha256.New(), rand.Reader, testGenerator.privKey.privateKey, testEncryptedPayload.EncryptedKey, nil)
 	testDecryptedPayload, err := decryptGCM(testEncryptedPayload.ProxyPayload, testKey, testEncryptedPayload.PayloadNonce)
 
@@ -185,7 +213,9 @@ func TestDecryptGCM(t *testing.T) {
 		t.Errorf("Unable to decrypt random GCM-encrypted bytes.")
 		t.Errorf("Error: %v", err)
 	}
-	if bytes.Compare(testDecryptedPayload, randomBytes) != 0 {
+	unwrapped := S2SPayload{}
+	unwrapped.Unmarshal(testDecryptedPayload)
+	if bytes.Compare(unwrapped.Layer4Payload, randomBytes) != 0 {
 		t.Errorf("Unable to correctly decrypt random GCM-encrypted bytes.")
 		t.Errorf("Error: %v", err)
 	}
@@ -193,7 +223,7 @@ func TestDecryptGCM(t *testing.T) {
 
 func TestRekey(t *testing.T) {
 
-	var rekeyTestGenerator = S2SPayloadGenerator{
+	var rekeyTestGenerator = S2SDataGenerator{
 		keyStore: testKeyStore,
 		privKey:  testPrivKey,
 		pubKey:   testPublic,
@@ -227,20 +257,20 @@ func TestMarshalling(t *testing.T) {
 	// Encrypt and marshal.
 	randomBytes := make([]byte, randomTestSize)
 	rand.Read(randomBytes)
-	testS2SPayload := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier())
-	marhsalledPayload, err := testS2SPayload.Marshal()
+	testS2SData := testGenerator.EncryptAndSign(randomBytes, testPublic.Identifier(), *testRemote, testProtocol)
+	marhsalledPayload, err := testS2SData.Marshal()
 	if err != nil {
 		t.Errorf("Marshalling of test payload failed: %v", err)
 	}
 
 	// Unmarshal and decrypt.
-	unmarshalledPayload := S2SPayload{}
+	unmarshalledPayload := S2SData{}
 	err = unmarshalledPayload.Unmarshal(marhsalledPayload)
 	if err != nil {
 		t.Errorf("Unmarshalling of marshalled test payload failed: %v", err)
 	}
 
-	if !reflect.DeepEqual(unmarshalledPayload, *testS2SPayload) {
+	if !reflect.DeepEqual(unmarshalledPayload, *testS2SData) {
 		t.Errorf("Improper reconstruction of payload after marshalling.")
 	}
 

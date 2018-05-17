@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 )
 
 /*
@@ -43,19 +44,21 @@ func decryptGCM(ciphertext []byte, key []byte, nonce []byte) (payload []byte, de
 	return payload, nil
 }
 
-// S2SPayload carries the encrypted payload along with a signature
-// from the source server, intended for protocol-transparent
-// transmission.
-type S2SPayload struct {
-	SourceIdentifier      string
-	DestinationIdentifier string
-	EncryptedKey          []byte
-	ProxyPayload          []byte
-	PayloadNonce          []byte
-	PayloadSignature      []byte
+var proxiedProtocols = map[int]string{
+	0: "error",
+	1: "tcp",
+	2: "udp",
 }
 
-// Marshal encodes the payload into transmittable bytes.
+// S2SPayload holds the original Layer 4 information, along with
+// the remote IP address and an ID to identify the supported protocol.
+type S2SPayload struct {
+	RemoteAddr    net.IPAddr
+	ProtocolID    int
+	Layer4Payload []byte
+}
+
+// Marshal encodes a server-to-server payload into serialised bytes.
 func (s S2SPayload) Marshal() ([]byte, error) {
 	b := bytes.Buffer{}
 	e := gob.NewEncoder(&b)
@@ -66,7 +69,7 @@ func (s S2SPayload) Marshal() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// Unmarshal decodes the payload into a server-to-server payload.
+// Unmarshal decodes the serialised bytes into a server-to-server payload.
 func (s *S2SPayload) Unmarshal(source []byte) error {
 	b := bytes.Buffer{}
 	b.Write(source)
@@ -78,9 +81,44 @@ func (s *S2SPayload) Unmarshal(source []byte) error {
 	return nil
 }
 
-// S2SPayloadGenerator creates S2SPayloads by encrypting payloads
+// S2SData carries the encrypted payload along with a signature
+// from the source server, intended for protocol-transparent
+// transmission, in addition to additional cipher information.
+type S2SData struct {
+	SourceIdentifier      string
+	DestinationIdentifier string
+	EncryptedKey          []byte
+	ProxyPayload          []byte
+	PayloadNonce          []byte
+	PayloadSignature      []byte
+}
+
+// Marshal encodes the data unit into transmittable bytes.
+func (s S2SData) Marshal() ([]byte, error) {
+	b := bytes.Buffer{}
+	e := gob.NewEncoder(&b)
+	err := e.Encode(s)
+	if err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+// Unmarshal decodes the seralised bytes into a server-to-server data unit.
+func (s *S2SData) Unmarshal(source []byte) error {
+	b := bytes.Buffer{}
+	b.Write(source)
+	d := gob.NewDecoder(&b)
+	err := d.Decode(s)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// S2SDataGenerator creates S2SDatas by encrypting payloads
 // with the correct target public key and signing.
-type S2SPayloadGenerator struct {
+type S2SDataGenerator struct {
 	keyStore       PubKeyStore
 	privKey        *RSAPrivateKey
 	pubKey         *RSAPublicKey
@@ -91,7 +129,7 @@ type S2SPayloadGenerator struct {
 
 // Rekey the cipher if the key has been used for a predefined
 // limit of nounces (significantly below 2^32, of course.)
-func (g *S2SPayloadGenerator) getCipher() error {
+func (g *S2SDataGenerator) getCipher() error {
 
 	g.keyNounceCount++
 
@@ -126,9 +164,15 @@ func (g *S2SPayloadGenerator) getCipher() error {
 }
 
 // EncryptAndSign a payload for a defined destination server identifier,
-// returns nil if invalid destination or signing error.
-// Encryption in OAEP mode, and signed with PSS.
-func (g *S2SPayloadGenerator) EncryptAndSign(payload []byte, dest string) *S2SPayload {
+// with a specific protocol and remote IP address. returns nil if invalid
+// destination or signing error. Encryption in OAEP mode, and signed with PSS.
+func (g *S2SDataGenerator) EncryptAndSign(payload []byte, dest string, ip net.IPAddr, protoID int) *S2SData {
+
+	// Check protocol.
+	if _, ok := proxiedProtocols[protoID]; !ok {
+		log.Printf("Invalid protocol specified (%d).\n", protoID)
+		return nil
+	}
 
 	// Find the destination server public key.
 	destinationPubKey := g.keyStore.Retrieve(dest)
@@ -162,7 +206,16 @@ func (g *S2SPayloadGenerator) EncryptAndSign(payload []byte, dest string) *S2SPa
 	}
 
 	// Now we can encrypt the payload.
-	encryptedPayload := g.currentCipher.Seal(payload[:0], nonce, payload, nil)
+	innerPayload, err := S2SPayload{
+		RemoteAddr:    ip,
+		ProtocolID:    protoID,
+		Layer4Payload: payload,
+	}.Marshal()
+	if err != nil {
+		log.Printf("Cannot properly wrap the payload for %v due to error %v.\n", dest, err)
+		return nil
+	}
+	encryptedPayload := g.currentCipher.Seal(innerPayload[:0], nonce, innerPayload, nil)
 
 	// Sign the payload with our private key.
 	payloadHash := sha256.Sum256(encryptedPayload)
@@ -172,7 +225,7 @@ func (g *S2SPayloadGenerator) EncryptAndSign(payload []byte, dest string) *S2SPa
 		return nil
 	}
 
-	return &S2SPayload{
+	return &S2SData{
 		SourceIdentifier:      g.pubKey.Identifier(),
 		DestinationIdentifier: destinationPubKey.Identifier(),
 		EncryptedKey:          encryptedKey,
@@ -182,16 +235,17 @@ func (g *S2SPayloadGenerator) EncryptAndSign(payload []byte, dest string) *S2SPa
 	}
 }
 
-// DecryptAndVerify a payload and its signature from source. Returns nil and error
-// if source public key mismatches the signature.
-func (g *S2SPayloadGenerator) DecryptAndVerify(packedPayload *S2SPayload) ([]byte, error) {
+// DecryptAndVerify a payload and its signature from source. Returns nils and error
+// if source public key mismatches the signature. Returns decrypted payload, remote IP
+// and protocol id otherwise.
+func (g *S2SDataGenerator) DecryptAndVerify(packedPayload *S2SData) ([]byte, *net.IPAddr, int, error) {
 
 	// Find the source server public key.
 	source := packedPayload.SourceIdentifier
 	sourcePubKey := g.keyStore.Retrieve(source)
 	if sourcePubKey == nil {
 		errorMsg := fmt.Sprintf("cannot find public key for source %s to verify the payload signature", source)
-		return nil, errors.New(errorMsg)
+		return nil, nil, 0, errors.New(errorMsg)
 	}
 
 	// Verify the signature of the encrypted payload.
@@ -200,7 +254,7 @@ func (g *S2SPayloadGenerator) DecryptAndVerify(packedPayload *S2SPayload) ([]byt
 	if sigerr != nil {
 		errorMsg := fmt.Sprintf("signature mismatch for source %s", source)
 		log.Printf("Signature Matching Error: %v\n", sigerr)
-		return nil, errors.New(errorMsg)
+		return nil, nil, 0, errors.New(errorMsg)
 	}
 
 	// Decrypt the GCM symmetric key.
@@ -208,7 +262,7 @@ func (g *S2SPayloadGenerator) DecryptAndVerify(packedPayload *S2SPayload) ([]byt
 	if err != nil {
 		errorMsg := fmt.Sprintf("cannot decrypt symmetric key from source %s", source)
 		log.Printf("Decryption Error: %v\n", err)
-		return nil, errors.New(errorMsg)
+		return nil, nil, 0, errors.New(errorMsg)
 	}
 
 	// Decrypt the payload proper now.
@@ -216,8 +270,16 @@ func (g *S2SPayloadGenerator) DecryptAndVerify(packedPayload *S2SPayload) ([]byt
 	if err != nil {
 		errorMsg := fmt.Sprintf("cannot decrypt payload from source %s", source)
 		log.Printf("Decryption Error: %v\n", err)
-		return nil, errors.New(errorMsg)
+		return nil, nil, 0, errors.New(errorMsg)
 	}
 
-	return payload, nil
+	// Unwrap the inner payload.
+	innerPayload := S2SPayload{}
+	err = innerPayload.Unmarshal(payload)
+	if err != nil {
+		errorMsg := fmt.Sprintf("Unwrapping of S2S payload from source %s failed: %v", source, err)
+		return nil, nil, 0, errors.New(errorMsg)
+	}
+
+	return innerPayload.Layer4Payload, &innerPayload.RemoteAddr, innerPayload.ProtocolID, nil
 }
