@@ -7,7 +7,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/icydoge/MoatCailin/crypt"
+	"github.com/chongyangshi/MoatCailin/crypt"
 )
 
 // Raw configurations for JSON parsing.
